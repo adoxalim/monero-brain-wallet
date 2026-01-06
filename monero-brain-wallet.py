@@ -14,9 +14,18 @@ L = int(
 )
 
 ALPHABET = "123456789ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz"
-
 DEFAULT_SALT = b"monero-brain-wallet"
 MIN_SALT_LEN = 12
+ENCODED_BLOCK_SIZES = {
+    1: 2,
+    2: 3,
+    3: 5,
+    4: 6,
+    5: 7,
+    6: 9,
+    7: 10,
+    8: 11,
+}
 
 # ---- Crypto utilities ----
 
@@ -32,19 +41,37 @@ def sc_reduce32(data: bytes) -> bytes:
 def hash_to_scalar(data: bytes) -> bytes:
     return sc_reduce32(keccak_256(data))
 
-def base58_encode(data: bytes) -> str:
+def encode_block(data: bytes) -> str:
     num = int.from_bytes(data, "big")
-    enc = ""
+    out = ""
     while num > 0:
         num, rem = divmod(num, 58)
-        enc = ALPHABET[rem] + enc
-    return enc
+        out = ALPHABET[rem] + out
+    return out
 
 def monero_base58_encode(data: bytes) -> str:
     result = ""
-    for i in range(0, len(data), 8):
-        result += base58_encode(data[i:i+8])
+    i = 0
+    while i < len(data):
+        block = data[i:i+8]
+        enc = encode_block(block)
+        enc = enc.rjust(
+            ENCODED_BLOCK_SIZES[len(block)],
+            ALPHABET[0]
+        )
+        result += enc
+        i += 8
     return result
+
+def is_valid_monero_address(address: str) -> bool:
+    if len(address) != 95:
+        return False
+    if not address.startswith("4"):
+        return False
+    for c in address:
+        if c not in ALPHABET:
+            return False
+    return True
 
 # ---- Brain wallet derivation ----
 
@@ -69,6 +96,9 @@ def brain_wallet(passphrase: str, salt: bytes):
     data = network_byte + pub_spend + pub_view
     checksum = keccak_256(data)[:4]
     address = monero_base58_encode(data + checksum)
+    
+    if not is_valid_monero_address(address):
+        raise ValueError("Generated wallet is INVALID (address check failed)")
 
     return {
         "private_spend_key": spend_key.hex(),
@@ -126,7 +156,13 @@ def main():
     else:
         salt_bytes = DEFAULT_SALT
 
-    wallet = brain_wallet(password, salt_bytes)
+    try:
+        wallet = brain_wallet(password, salt_bytes)
+    except Exception as e:
+        print("\nERROR:", e)
+        print("No wallet generated.")
+        raise SystemExit(1)
+
 
     print("\n=== Monero Brain Wallet ===")
     print(f"Salt: {salt_bytes.decode(errors='ignore')}\n")
@@ -135,3 +171,4 @@ def main():
 
 if __name__ == "__main__":
     main()
+
